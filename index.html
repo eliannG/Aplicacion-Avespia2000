@@ -90,7 +90,7 @@ canvas.shake{animation:shk .08s 8}
 const ROOM='sq-hw26-r7k2';                                    // igual en celular/index.html
 const PHONE_URL='https://elianng.github.io/Sonar-Avespia2000/'; // donde está publicada la página del celular
 // Duración máxima de cada fase (para que el juego entero dure ~4 min)
-const BATS_MAX=30000,BOSS_MAX=45000,FFA_MAX=25000,ROUND_MAX=15000,FFA_HP=10,HEARTS=2;
+const BATS_MAX=30000,BOSS_MAX=65000,FFA_MAX=25000,ROUND_MAX=15000,FFA_HP=12,HEARTS=3;
 const RANGE=300,PULSE_MS=5200,PULSE_SPEED=1.5,N_AMB=9;
 const QS=new URLSearchParams(location.search);
 const BROKERS=QS.get('broker')?[QS.get('broker')]:['wss://broker.hivemq.com:8884/mqtt','wss://broker.emqx.io:8084/mqtt'];
@@ -170,6 +170,8 @@ function active(){return [...players.values()].filter(p=>!p.spect)}
 setInterval(()=>{const n=NOW();if(PH==='idle'||PH==='lobby'){players.forEach((p,id)=>{if(!p.bot&&n-p.last>30000)players.delete(id)})}},4000);
 
 // ======================= ESTADO DEL JUEGO =======================
+let cdUntil=0;function countdown(){cdUntil=NOW()+6000;phT=cdUntil;players.forEach(p=>p.sh=false);sendState(true)}
+const inCd=()=>NOW()<cdUntil;
 let PH='idle',phT=0,insNext=null,insInfo=null;
 let gBats=[],killed=0,nB=0,projs=[],parts=[],gridA=1,word=null,eatP=0,eatAnim=null,cleanText=0;
 const boss={hp:0,max:0,x:0,y:0,scale:0,flash:-1e9,atk:null,next:0,alt:0,dead:false};
@@ -182,6 +184,7 @@ let lastSend=0;
 function sendState(force){const n=NOW();if(!force&&n-lastSend<200)return;lastSend=n;
   const st={seq:++seq,ph:PH,n:active().length};
   if(PH==='ins')st.ins=insInfo;
+  if(inCd()){st.cd=Math.ceil((cdUntil-NOW())/1000);st.col={};players.forEach(p=>{st.col[p.id]=Math.round(p.hue)})}
   if(['boss','ffa','bats'].includes(PH)){st.hp={};players.forEach(p=>{st.hp[p.id]=Math.max(0,Math.round(p.hp))});st.max=PH==='ffa'?FFA_HP:100}
   if(PH==='boss')st.warn=boss.atk&&(boss.atk.type==='ball'&&boss.atk.st==='charge'?'ball':boss.atk.type==='beam'&&boss.atk.st!=='done'?'beam':null)||null;
   if(fin){st.fin=[fin.L.id,fin.R.id];st.fn=[fin.L.name,fin.R.name];st.hearts=fin.hearts}
@@ -218,26 +221,26 @@ $('#bStart').onclick=()=>{$('#lobby').classList.remove('on');
 function startBats(){const n=Math.max(1,active().length);nB=clamp(5+Math.round(n*.35),5,22);const total=Math.max(20,n*14),hp=Math.ceil(total/nB);
   gBats=[];killed=0;word=buildWord();
   for(let i=0;i<nB;i++){const a=rnd(0,Math.PI*2),d=rnd(.35,.92);gBats.push({x:Math.cos(a)*d,y:Math.sin(a)*d,h:rnd(0,7),v:rnd(.05,.12),hp,max:hp,flash:-1e9,dead:false,dieT:0,phase:rnd(0,9),id:`${PFX[i%6]}-${String(ri(1,99)).padStart(2,'0')}`})}
-  active().forEach(p=>{p.hp=100;p.alive=true;p.tx=null});setPH('bats')}
+  active().forEach(p=>{p.hp=100;p.alive=true;p.tx=null});setPH('bats');countdown()}
 
-function attack(p){const t=NOW();if(!p||p.spect)return;
+function attack(p){const t=NOW();if(!p||p.spect||t<cdUntil)return;
   if(PH==='bats'){if(t-p.lastAtk<800)return;p.lastAtk=t;const tg=nearest(p,gBats.filter(b=>!b.dead&&b.hp>0));if(!tg)return;
     play('shoot',.35,70);projs.push({fx:p.x,fy:p.y,tgt:tg,t0:t,dur:320,col:`hsl(${p.hue},100%,70%)`,hit:()=>{if(tg.dead)return;tg.hp--;tg.flash=NOW();play('hit',.45,60);if(tg.hp<=0)killBat(tg)}})}
   else if(PH==='boss'){if(t-p.lastAtk<800||p.hp<=0)return;p.lastAtk=t;play('shoot',.3,70);
     projs.push({fx:p.x,fy:p.y,tgt:{x:0,y:0},t0:t,dur:380,col:`hsl(${p.hue},100%,70%)`,hit:()=>{if(boss.dead)return;boss.hp--;boss.flash=NOW();play('bosshit',.5,70);burst(rnd(-.05,.05),rnd(-.05,.05),'#ff3a3a',3);if(boss.hp<=0)killBoss()}})}
   else if(PH==='ffa'&&!ffaOver){if(t-p.lastAtk<800||!p.alive)return;p.lastAtk=t;const tg=nearest(p,active().filter(q=>q!==p&&q.alive));if(!tg)return;play('shoot',.3,60);
-    projs.push({fx:p.x,fy:p.y,tgt:tg,t0:t,dur:260,col:`hsl(${p.hue},100%,70%)`,hit:()=>{if(!tg.alive||PH!=='ffa'||ffaOver)return;tg.hp--;tg.hitT=NOW();play('hit',.4,50);if(tg.hp<=0)eliminate(tg)}})}}
+    projs.push({fx:p.x,fy:p.y,tgt:tg,t0:t,dur:260,col:`hsl(${p.hue},100%,70%)`,hit:()=>{if(!tg.alive||PH!=='ffa'||ffaOver)return;if(tg.sh){tg.flash=NOW();play('shield',.5,80);return}tg.hp--;tg.hitT=NOW();play('hit',.4,50);if(tg.hp<=0)eliminate(tg)}})}}
 function nearest(p,arr){let best=null,bd=1e9;arr.forEach(b=>{const d=Math.hypot(b.x-p.x,b.y-p.y);if(d<bd){bd=d;best=b}});return best}
 function killBat(b){b.dead=true;b.dieT=NOW();killed++;play('batdie',.7);burst(b.x,b.y,'#3ddc84',14);
   word.act=Math.floor(killed/nB*word.T.length);if(killed>=nB){setTimeout(wordDone,900)}}
 function wordDone(){word.act=word.T.length;setPH('word');play('word',.9);cleanText=NOW();banner('SEÑAL COMPLETA',2500);setTimeout(bossIntro,2500)}
 
-function bossIntro(){setPH('bossIntro');acdcPlay(0);play('boss',1);boss.scale=0;boss.dead=false;boss.hp=boss.max=Math.max(25,active().length*20);updBossBar();
+function bossIntro(){setPH('bossIntro');acdcPlay(0);play('boss',1);boss.scale=0;boss.dead=false;boss.hp=boss.max=Math.max(40,active().length*36);updBossBar();
   const t0=NOW();
   active().forEach((p,i,arr)=>{const a=i/arr.length*Math.PI*2-Math.PI/2;p.tx=Math.cos(a)*.84;p.ty=Math.sin(a)*.84;p.slotOff=true});
   setTimeout(()=>{play('eat',1);eatAnim={t0:NOW(),dir:1}},2300);
   setTimeout(()=>{showIns('JEFE FINAL · CONDE VLADIMIRO',`Tenés dos botones:<br>· <b>ATACAR</b>: le pegás al vampiro. Se recarga en 1 segundo.<br>· <b>PROTEGER</b>: mantenelo apretado y se arma un escudo de energía. Se gasta mientras lo usás y tarda 10 segundos en recargarse.<br><span class="rd">· Cuando el vampiro cargue la BOLA DE SANGRE o el RAYO CARMESÍ, ¡protegete!</span>`,startBoss)},4800)}
-function startBoss(){active().forEach(p=>{p.hp=100;p.down=0});boss.atk=null;boss.next=NOW()+3500;boss.alt=0;setPH('boss')}
+function startBoss(){active().forEach(p=>{p.hp=100;p.down=0});boss.atk=null;boss.alt=0;setPH('boss');countdown();boss.next=cdUntil+2500}
 function updBossBar(){$('#bossI').style.width=Math.max(0,boss.hp/boss.max*100)+'%'}
 function bossTick(t){if(PH!=='boss'||boss.dead)return;const ps=active();
   ps.forEach(p=>{if(p.hp<=0&&p.down&&t>p.down){p.hp=60;p.down=0}});
@@ -262,15 +265,15 @@ function trickOrTreat(){$('#banner').classList.remove('on');const ps=active();
   if(ps.length<=1){if(ps.length===1)declareWin(ps[0]);return}
   ps.forEach(p=>{p.hp=FFA_HP;p.max=FFA_HP;p.alive=true;p.sh=false});
   if(ps.length===2){setupFinal(ps[0],ps[1]);return}
-  showIns('🍬 ¿DULCE O TRUCO? · TODOS CONTRA TODOS',`¡Ahora es entre ustedes!<br>· Tenés <b>10 de vida</b>.<br>· Cada toque de <b>ATACAR</b> le pega al Avespía <b>más cercano</b> a tu punto. Se recarga en 1 segundo.<br>· <span class="rd">PROTEGER está desactivado.</span><br>· Los últimos 2 en pie van a la FINAL.`,startFFA)}
+  showIns('🍬 ¿DULCE O TRUCO? · TODOS CONTRA TODOS',`¡Ahora es entre ustedes!<br>· Tenés <b>12 de vida</b>.<br>· Cada toque de <b>ATACAR</b> le pega al Avespía <b>más cercano</b> a tu punto. Se recarga en 1 segundo.<br>· <b>PROTEGER</b> bloquea los golpes, pero <span class="rd">en esta fase NO se recarga</span>: usalo con cuidado.<br>· Los que cayeron antes, ¡reviven!<br>· Los últimos 2 en pie van a la FINAL.`,startFFA)}
 let ffaOver=false;
-function startFFA(){cleanText=0;ffaOver=false;active().forEach(p=>{const a=rnd(0,7),d=Math.sqrt(Math.random())*.45;p.x=Math.cos(a)*d;p.y=Math.sin(a)*d;p.tx=null;p.vx=rnd(-.05,.05);p.vy=rnd(-.05,.05);p.hp=FFA_HP;p.alive=true});setPH('ffa');banner('¡A PELEAR!',1800)}
+function startFFA(){cleanText=0;ffaOver=false;active().forEach(p=>{const a=rnd(0,7),d=Math.sqrt(Math.random())*.45;p.x=Math.cos(a)*d;p.y=Math.sin(a)*d;p.tx=null;p.vx=rnd(-.05,.05);p.vy=rnd(-.05,.05);p.hp=FFA_HP;p.alive=true;p.down=0});setPH('ffa');countdown();setTimeout(()=>{if(PH==='ffa')banner('¡A PELEAR!',1800)},6000)}
 function eliminate(p){p.alive=false;p.hp=0;play('elim',.8);burst(p.x,p.y,`hsl(${p.hue},100%,60%)`,22);const al=active().filter(q=>q.alive);sendState(true);
   if(ffaOver)return;if(al.length===2){ffaOver=true;setTimeout(()=>setupFinal(al[0],al[1]),1200)}else if(al.length<=1&&al[0]){ffaOver=true;setTimeout(()=>declareWin(al[0]),1200)}}
 function setupFinal(L,Rr){cleanText=0;ffaOver=true;fin={L,R:Rr,x:0,hearts:{[L.id]:HEARTS,[Rr.id]:HEARTS},round:0,active:false,countT:0};
   active().forEach(p=>{if(p!==L&&p!==Rr)p.alive=false});L.alive=Rr.alive=true;L.tx=-.62;L.ty=0;Rr.tx=.62;Rr.ty=0;setPH('finalSetup');banner(`🔥 FINAL 🔥<small>${L.name} vs ${Rr.name}</small>`);
-  actBtn('⚔️ INICIAR FINAL',()=>{showIns('⚔️ FINAL · CHOQUE DE RAYOS',`${L.name} vs ${Rr.name}<br>· Los dos lanzan un rayo que choca en el medio.<br>· <b>Apretá el botón lo más rápido que puedas</b> para empujar el choque hacia tu rival.<br>· Si el choque llega a tu rival, pierde un corazón ❤️.<br>· Cada uno tiene 2. ¡El último en pie gana!<br>· Los demás: alienten desde el celular.`,startFinal)})}
-function startFinal(){$('#banner').classList.remove('on');setPH('final');acdcPlay(ACDC.paused?acdcSaved:ACDC.currentTime);nextRound()}
+  actBtn('⚔️ INICIAR FINAL',()=>{showIns('⚔️ FINAL · CHOQUE DE RAYOS',`${L.name} vs ${Rr.name}<br>· Los dos lanzan un rayo que choca en el medio.<br>· <b>Apretá el botón lo más rápido que puedas</b> para empujar el choque hacia tu rival.<br>· Si el choque llega a tu rival, pierde un corazón ❤️.<br>· Cada uno tiene 3. ¡El último en pie gana!<br>· Los demás: alienten desde el celular.`,startFinal)})}
+function startFinal(){$('#banner').classList.remove('on');setPH('final');acdcPlay(ACDC.paused?acdcSaved:ACDC.currentTime);countdown();fin.round=1;fin.x=0;fin.active=false;fin.countT=-1e9;setTimeout(()=>{if(PH!=='final')return;banner('ROUND 1 · ¡YA!',1000);fin.active=true;fin.startT=NOW();clashOn();sendState(true)},6000)}
 function nextRound(){fin.round++;fin.x=0;fin.active=false;fin.countT=NOW();banner(`ROUND ${fin.round}`,1500);setTimeout(()=>{if(PH!=='final')return;banner('¡YA!',800);fin.active=true;fin.startT=NOW();clashOn();sendState(true)},2400)}
 setInterval(()=>{if(PH==='final'&&fin&&fin.active&&NOW()-fin.startT>ROUND_MAX){banner('¡TIEMPO!',1200);roundLost(fin.x>0?fin.R:fin.L)}},250);
 setInterval(()=>{const t=NOW();
@@ -289,7 +292,7 @@ function roundLost(p){fin.active=false;clashOff();fin.hearts[p.id]--;p.hitT=NOW(
   const other=p===fin.L?fin.R:fin.L;if(fin.hearts[p.id]<=0){setTimeout(()=>declareWin(other),1800)}else setTimeout(nextRound,2600)}
 function cheer(side){if(PH!=='final'&&PH!=='finalSetup')return;const x=side==='L'?-.62:.62;parts.push({x:x+rnd(-.12,.12),y:.25,vx:rnd(-.05,.05),vy:-rnd(.15,.3),life:1.6,max:1.6,col:side==='L'?'#7df9ff':'#ff9a3a',size:rnd(10,18),txt:pick(['❤️','🔥','👏','⚡','🎃'])})}
 function pick(a){return a[ri(0,a.length-1)]}
-function declareWin(p){winner=p;clashOff();setPH('win');play('win',1);if(ACDC.paused)acdcPlay(acdcSaved);p.tx=0;p.ty=.05;banner(`🏆 ${p.name} 🏆<small>¡GANADOR DE LA NOCHE DE HALLOWEEN!</small>`)}
+function declareWin(p){winner=p;clashOff();setPH('win');play('win',1);if(ACDC.paused){try{ACDC.currentTime=acdcSaved}catch(e){}ACDC.volume=1;ACDC.play().catch(()=>{})}clearInterval(acdcFadeT);ACDC.volume=1;acdcFade(0,12000,()=>ACDC.pause());p.tx=0;p.ty=.05;banner(`🏆 ${p.name} 🏆<small>¡GANADOR DE LA NOCHE DE HALLOWEEN!</small>`)}
 
 // ======================= PARTÍCULAS =======================
 function burst(x,y,col,n){for(let i=0;i<n;i++){const a=rnd(0,7),s=rnd(.1,.6);parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rnd(.5,1.2),max:1.2,col,size:rnd(2,5)})}}
@@ -318,6 +321,7 @@ function frame(t){const dt=Math.min(.1,(t-last)/1000);last=t;
   if(PH==='final'||PH==='finalSetup')drawFinal(t);
   movePlayers(dt,t);drawProjs(t);drawPlayers(t);drawParts(dt);
   if(PH==='win')drawWin(t);
+  if(t<cdUntil)drawCd(t);
   bossTick(t);
   $('#nph').textContent=active().length;$('#qn').textContent=active().length;
   requestAnimationFrame(frame)}
@@ -347,7 +351,7 @@ function drawAmb(t){let cnt=0,near=Infinity;amb.forEach(b=>{const age=Math.max(0
 
 function drawGameBats(t,dt){gBats.forEach(b=>{
   if(b.dead){const e=(t-b.dieT)/1000;if(e>1.4)return;b.y+=dt*.5;b.x+=Math.sin(e*14)*.004;batAt(CX+b.x*R,CY+b.y*R,(R/900)*.24,1,'#ff5a5a',1-e/1.4,e*8);return}
-  if(Math.random()<.02)b.h+=rnd(-1,1);b.x+=Math.cos(b.h)*b.v*dt;b.y+=Math.sin(b.h)*b.v*dt;if(Math.hypot(b.x,b.y)>.92)b.h=Math.atan2(-b.y,-b.x)+rnd(-.5,.5);
+  if(!inCd()){if(Math.random()<.02)b.h+=rnd(-1,1);b.x+=Math.cos(b.h)*b.v*dt;}else{}b.y+=Math.sin(b.h)*b.v*dt;if(Math.hypot(b.x,b.y)>.92)b.h=Math.atan2(-b.y,-b.x)+rnd(-.5,.5);
   const px=CX+b.x*R,py=CY+b.y*R,fl=t-b.flash<120;batAt(px,py,(R/900)*.24,.55+.45*Math.abs(Math.sin(t/100+b.phase)),fl?'#ffffff':'#3ddc84',1,Math.sin(t/600+b.phase)*.15);
   const w=60;ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(px-w/2,py+24,w,6);ctx.fillStyle='#ff4d4d';ctx.fillRect(px-w/2,py+24,w*b.hp/b.max,6)});
   ctx.save();ctx.font='bold 22px monospace';ctx.fillStyle='#d8ffe8';ctx.textAlign='center';ctx.shadowColor='#3ddc84';ctx.shadowBlur=12;ctx.fillText(`MURCIÉLAGOS: ${nB-killed} / ${nB}`,CX,CY-R-46);ctx.restore()}
@@ -411,7 +415,7 @@ function drawVampire(x,y,s,flash,t){ctx.save();ctx.translate(x,y);
 function movePlayers(dt,t){const ps=[...players.values()];
   ps.forEach(p=>{
     if(PH==='bats'||(PH==='word')){const idx=p.k<word.perm.length?word.perm[p.k]:-1;if(idx>=0&&idx<word.act){p.x+=(word.T[idx].x-p.x)*.06;p.y+=(word.T[idx].y-p.y)*.06;return}}
-    if(PH==='ffa'&&p.alive&&!p.spect){p.vx+=rnd(-.3,.3)*dt;p.vy+=rnd(-.3,.3)*dt;ps.forEach(q=>{if(q===p||!q.alive||q.spect)return;const dx=p.x-q.x,dy=p.y-q.y,d=Math.hypot(dx,dy)||1;if(d<.12){p.vx+=dx/d*.4*dt;p.vy+=dy/d*.4*dt}});
+    if(PH==='ffa'&&p.alive&&!p.spect){if(inCd())return;p.vx+=rnd(-.3,.3)*dt;p.vy+=rnd(-.3,.3)*dt;ps.forEach(q=>{if(q===p||!q.alive||q.spect)return;const dx=p.x-q.x,dy=p.y-q.y,d=Math.hypot(dx,dy)||1;if(d<.12){p.vx+=dx/d*.4*dt;p.vy+=dy/d*.4*dt}});
       const d=Math.hypot(p.x,p.y);if(d>.6){p.vx-=p.x*.6*dt;p.vy-=p.y*.6*dt}p.vx*=.98;p.vy*=.98;const sp=Math.hypot(p.vx,p.vy);if(sp>.12){p.vx*=.12/sp;p.vy*=.12/sp}p.x+=p.vx*dt;p.y+=p.vy*dt;return}
     if(p.tx!=null){p.x+=(p.tx-p.x)*.05;p.y+=(p.ty-p.y)*.05}
     else{p.x+=Math.sin(t/1700+p.k)*.0005;p.y+=Math.cos(t/1900+p.k*2)*.0005}})}
@@ -451,6 +455,9 @@ function drawFinal(t){if(!fin)return;const L=fin.L,Rr=fin.R;const lx=CX+L.x*R,rx
   if(PH==='final'&&!fin.active){const e=(t-fin.countT)/1000;if(e<2.4){ctx.save();ctx.font=`bold ${Math.round(R*.35)}px Arial`;ctx.textAlign='center';ctx.fillStyle='#fff';ctx.shadowColor='#ff7a1a';ctx.shadowBlur=30;ctx.globalAlpha=1-(e%.8)/.8;ctx.fillText(String(3-Math.floor(e/.8)),CX,CY+R*.12);ctx.restore()}}
   ctx.save();ctx.font='bold 60px Arial';ctx.textAlign='center';ctx.fillStyle='#fff';ctx.shadowColor='#ff2a2a';ctx.shadowBlur=30;ctx.fillText('VS',CX,CY-R*.45);ctx.restore()}
 
+function drawCd(t){const n=Math.ceil((cdUntil-t)/1000);
+  players.forEach(p=>{if(p.spect||(PH==='ffa'||PH==='final')&&!p.alive)return;const x=CX+p.x*R,y=CY+p.y*R,r=18+10*Math.abs(Math.sin(t/250));ctx.save();ctx.strokeStyle=`hsl(${p.hue},100%,70%)`;ctx.lineWidth=3;ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=18;ctx.beginPath();ctx.arc(x,y,r+(PH==='final'?R*.11:0),0,7);ctx.stroke();ctx.restore()});
+  ctx.save();ctx.textAlign='center';ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(CX-260,CY-R-20,520,74);ctx.font='bold 34px monospace';ctx.fillStyle='#ffd34d';ctx.shadowColor='#ff7a1a';ctx.shadowBlur=14;ctx.fillText(`¡UBICÁ TU PUNTO! EMPIEZA EN ${n}`,CX,CY-R+28);ctx.restore()}
 function drawWin(t){if(Math.random()<.12){const x=rnd(-1.2,1.2),y=rnd(-.8,.3),col=pick(['#ff4d4d','#ffd34d','#7df9ff','#3ddc84','#ff7a1a','#c08cff']);for(let i=0;i<40;i++){const a=rnd(0,7),s=rnd(.2,.7);parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rnd(.8,1.6),max:1.6,col,size:rnd(2,4)})}if(Math.random()<.5)play('explode',.25,400)}
   if(Math.random()<.5)parts.push({x:rnd(-1.4,1.4),y:-1.1,vx:rnd(-.1,.1),vy:rnd(.2,.5),life:3,max:3,col:'#fff',size:rnd(8,14),txt:pick(['🎉','🎃','🦇','⭐','🍬','👑'])});
   if(!winner)return;const x=CX+winner.x*R,y=CY+winner.y*R,r=R*.13;ctx.save();ctx.translate(x,y-r-30+Math.sin(t/300)*6);ctx.fillStyle='#ffd34d';ctx.shadowColor='#ffb020';ctx.shadowBlur=40;ctx.beginPath();
