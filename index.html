@@ -109,7 +109,7 @@ const NOW=()=>performance.now();
 const SND={};['ping:sonar.mp3','boost','shoot','hit','batdie','join','word','boss','eat','charge','explode','beam','shield','bosshit','bossdie','elim','round','win','clash'].forEach(s=>{const [k,f]=s.split(':');const a=new Audio(f?f:'sfx/'+k+'.mp3');a.preload='auto';SND[k]=a});
 const lastPlay={};
 function play(k,vol=1,minGap=0,offset=0){const n=NOW();if(minGap&&lastPlay[k]&&n-lastPlay[k]<minGap)return null;lastPlay[k]=n;try{const a=SND[k].cloneNode();a.volume=clamp(vol,0,1);if(offset)a.currentTime=offset;a.play().catch(()=>{});return a}catch(e){return null}}
-const ACDC=new Audio('sfx/acdc.mp3');ACDC.preload='auto';let acdcSaved=0,acdcFadeT=null;
+const ACDC=new Audio('sfx/acdc.mp3');ACDC.preload='auto';ACDC.loop=true;let acdcSaved=0,acdcFadeT=null;
 function acdcFade(to,ms,then){clearInterval(acdcFadeT);const from=ACDC.volume,t0=NOW();acdcFadeT=setInterval(()=>{const p=Math.min(1,(NOW()-t0)/ms);ACDC.volume=clamp(from+(to-from)*p,0,1);if(p>=1){clearInterval(acdcFadeT);then&&then()}},40)}
 function acdcPlay(from){clearInterval(acdcFadeT);try{ACDC.currentTime=from||0}catch(e){}ACDC.volume=0;ACDC.play().catch(()=>{});acdcFade(1,700)}
 let clashLoop=null;function clashOn(){if(clashLoop)return;clashLoop=SND.clash.cloneNode();clashLoop.loop=true;clashLoop.volume=.45;clashLoop.play().catch(()=>{})}
@@ -194,8 +194,8 @@ function sendState(force){const n=NOW();if(!force&&n-lastSend<200)return;lastSen
 setInterval(()=>{if(PH!=='idle')sendState()},250);
 setInterval(()=>{if(PH==='idle')sendState(true)},2000);
 
-function showIns(title,body,next){insInfo={t:title.replace(/<[^>]+>/g,''),b:body.replace(/<br>/g,'\n').replace(/<[^>]+>/g,'')};$('#insT').innerHTML=title;$('#insB').innerHTML=body;$('#ins').classList.add('on');insNext=next;setPH('ins')}
-$('#bCont').onclick=()=>{$('#ins').classList.remove('on');const f=insNext;insNext=null;f&&f()};
+function showIns(title,body,next){insInfo={t:title.replace(/<[^>]+>/g,''),b:body.replace(/<br>/g,'\n').replace(/<[^>]+>/g,'')};$('#insT').innerHTML=title;$('#insB').innerHTML=body;$('#ins').classList.add('on');insNext=next;setPH('ins');if(!ACDC.paused)acdcFade(.3,800)}
+$('#bCont').onclick=()=>{$('#ins').classList.remove('on');if(!ACDC.paused)acdcFade(1,800);const f=insNext;insNext=null;f&&f()};
 function banner(html,ms){const b=$('#banner');b.innerHTML=html;b.classList.add('on');clearTimeout(b._t);if(ms)b._t=setTimeout(()=>b.classList.remove('on'),ms)}
 function actBtn(label,fn){const b=$('#act');if(!label){b.style.display='none';return}b.textContent=label;b.style.display='block';b.onclick=()=>{b.style.display='none';fn()}}
 
@@ -258,7 +258,7 @@ function bossTick(t){if(PH!=='boss'||boss.dead)return;const ps=active();
 function damage(p,d){if(p.hp<=0)return;if(p.sh){p.flash=NOW();play('shield',.6,80);return}p.hp-=d;p.hitT=NOW();play('hit',.6,60);burst(p.x,p.y,'#ff3030',8);if(p.hp<=0){p.hp=0;p.down=NOW()+8000;play('elim',.6,100)}sendState(true)}
 function killBoss(){boss.dead=true;boss.atk=null;setPH('bossDead');play('bossdie',1);shake();for(let i=0;i<6;i++)setTimeout(()=>{burst(rnd(-.15,.15),rnd(-.15,.15),i%2?'#ff2a2a':'#ffd34d',40);shake()},i*250);
   setTimeout(()=>{eatAnim={t0:NOW(),dir:-1};play('word',.9)},1500);
-  setTimeout(()=>{cleanText=NOW();banner('¡¡¡FELICITACIONES!!!<small>Salvamos la noche de Halloween</small>');acdcFade(0,4500,()=>{acdcSaved=ACDC.currentTime;ACDC.pause()})},3000);
+  setTimeout(()=>{cleanText=NOW();banner('¡¡¡FELICITACIONES!!!<small>Salvamos la noche de Halloween</small>');/* la música sigue, continua */},3000);
   setTimeout(()=>actBtn('🍬 ¿DULCE O TRUCO? 🎃',trickOrTreat),5000)}
 
 function trickOrTreat(){$('#banner').classList.remove('on');const ps=active();
@@ -273,7 +273,7 @@ function eliminate(p){p.alive=false;p.hp=0;play('elim',.8);burst(p.x,p.y,`hsl(${
 function setupFinal(L,Rr){cleanText=0;ffaOver=true;fin={L,R:Rr,x:0,hearts:{[L.id]:HEARTS,[Rr.id]:HEARTS},round:0,active:false,countT:0};
   active().forEach(p=>{if(p!==L&&p!==Rr)p.alive=false});L.alive=Rr.alive=true;L.tx=-.62;L.ty=0;Rr.tx=.62;Rr.ty=0;setPH('finalSetup');banner(`🔥 FINAL 🔥<small>${L.name} vs ${Rr.name}</small>`);
   actBtn('⚔️ INICIAR FINAL',()=>{showIns('⚔️ FINAL · CHOQUE DE RAYOS',`${L.name} vs ${Rr.name}<br>· Los dos lanzan un rayo que choca en el medio.<br>· <b>Apretá el botón lo más rápido que puedas</b> para empujar el choque hacia tu rival.<br>· Si el choque llega a tu rival, pierde un corazón ❤️.<br>· Cada uno tiene 3. ¡El último en pie gana!<br>· Los demás: alienten desde el celular.`,startFinal)})}
-function startFinal(){$('#banner').classList.remove('on');setPH('final');acdcPlay(ACDC.paused?acdcSaved:ACDC.currentTime);countdown();fin.round=1;fin.x=0;fin.active=false;fin.countT=-1e9;setTimeout(()=>{if(PH!=='final')return;banner('ROUND 1 · ¡YA!',1000);fin.active=true;fin.startT=NOW();clashOn();sendState(true)},6000)}
+function startFinal(){$('#banner').classList.remove('on');setPH('final');if(ACDC.paused)acdcPlay(acdcSaved);else acdcFade(1,600);countdown();fin.round=1;fin.x=0;fin.active=false;fin.countT=-1e9;setTimeout(()=>{if(PH!=='final')return;banner('ROUND 1 · ¡YA!',1000);fin.active=true;fin.startT=NOW();clashOn();sendState(true)},6000)}
 function nextRound(){fin.round++;fin.x=0;fin.active=false;fin.countT=NOW();banner(`ROUND ${fin.round}`,1500);setTimeout(()=>{if(PH!=='final')return;banner('¡YA!',800);fin.active=true;fin.startT=NOW();clashOn();sendState(true)},2400)}
 setInterval(()=>{if(PH==='final'&&fin&&fin.active&&NOW()-fin.startT>ROUND_MAX){banner('¡TIEMPO!',1200);roundLost(fin.x>0?fin.R:fin.L)}},250);
 setInterval(()=>{const t=NOW();
